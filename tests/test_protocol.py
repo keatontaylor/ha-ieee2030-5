@@ -216,3 +216,58 @@ async def test_relative_advertised_links(meter_server, certificates):
     async with aiohttp.ClientSession() as session:
         client = MeterClient(session, "127.0.0.1", server.port, context(certificates), "standard")
         assert await client.discover() == {"/reading/1": 1234}
+
+
+def test_legacy_server_options_are_scoped_and_renegotiation_disabled(certificates):
+    default = ssl.create_default_context()
+    before = default.options
+    legacy = context(certificates)
+    strict = build_ssl_context(
+        str(certificates / "client.pem"),
+        str(certificates / "client.key"),
+        legacy=False,
+        ca=str(certificates / "ca.pem"),
+    )
+    assert legacy.options & ssl.OP_LEGACY_SERVER_CONNECT
+    assert legacy.options & ssl.OP_NO_RENEGOTIATION
+    assert not strict.options & ssl.OP_LEGACY_SERVER_CONNECT
+    assert default.options == before
+    assert not default.options & ssl.OP_LEGACY_SERVER_CONNECT
+
+
+async def test_empty_optional_phase_is_skipped_and_later_empty_reading_unavailable(
+    meter_server, certificates
+):
+    server, routes, _, _ = meter_server
+    routes["/upt/1/mr/22/r"] = xml("Reading")  # Unsupported optional phase.
+    routes["/readings"] = xml(
+        "ReadingList",
+        '<Reading href="/reading/1"><value>1234</value></Reading><Reading href="/unused"/>',
+        'all="2" results="2"',
+    )
+    async with aiohttp.ClientSession() as session:
+        client = MeterClient(session, "127.0.0.1", server.port, context(certificates), "itron")
+        values = await client.discover()
+        assert values == {"/reading/1": 1234, "/upt/1/mr/1/r": -42}
+        assert "/unused" not in client.registers
+        assert "/upt/1/mr/22/r" not in client.registers
+        routes["/reading/1"] = xml("Reading")
+        assert (await client.poll())["/reading/1"] is None
+
+
+async def test_itron_does_not_crawl_historical_archives_or_repoll_during_setup(
+    meter_server, certificates
+):
+    server, routes, calls, _ = meter_server
+    routes["/sets"] = xml(
+        "ReadingSetList",
+        '<ReadingSet href="/sets/1"><ReadingListLink href="/readings"/></ReadingSet>',
+        'all="500" results="1"',
+    )
+    async with aiohttp.ClientSession() as session:
+        client = MeterClient(session, "127.0.0.1", server.port, context(certificates), "itron")
+        assert await client.discover() == {"/reading/1": 1234, "/upt/1/mr/1/r": -42}
+    assert "/sets" not in calls
+    assert "/readings" not in calls
+    assert calls.count("/reading/1") == 1
+    assert calls.count("/upt/1/mr/1/r") == 1

@@ -112,17 +112,23 @@ async def test_native_home_assistant_file_upload(hass, hass_client, meter_server
         response = await http_client.post("/api/file_upload", data=form)
         assert response.status == 200
         uploads[field] = (await response.json())["file_id"]
+    data = {
+        "host": "127.0.0.1",
+        "port": meter_server[0].port,
+        "profile": "itron",
+        "interval": 30,
+        **uploads,
+    }
+    original = meter_server[1]["/dcap"]
+    meter_server[1]["/dcap"] = 403
+    rejected = await hass.config_entries.flow.async_configure(result["flow_id"], data)
+    assert rejected["type"] == FlowResultType.FORM
+    assert rejected["errors"] == {"base": "invalid_auth"}
+    assert not hass.data[_DATA].files
+    meter_server[1]["/dcap"] = original
+    # Retry with the same consumed UUIDs after correcting the connection issue.
     with patch("custom_components.ieee2030_5.async_setup_entry", return_value=True):
-        result = await hass.config_entries.flow.async_configure(
-            result["flow_id"],
-            {
-                "host": "127.0.0.1",
-                "port": meter_server[0].port,
-                "profile": "itron",
-                "interval": 30,
-                **uploads,
-            },
-        )
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], data)
     assert result["type"] == FlowResultType.CREATE_ENTRY
     assert not hass.data[_DATA].files
 
