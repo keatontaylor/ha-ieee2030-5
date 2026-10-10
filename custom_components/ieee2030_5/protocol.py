@@ -99,6 +99,10 @@ def build_ssl_context(
         context.minimum_version = ssl.TLSVersion.TLSv1_2
         context.maximum_version = ssl.TLSVersion.TLSv1_2
         context.set_ciphers("ECDHE-ECDSA-AES128-CCM8:@SECLEVEL=0")
+        # Older Itron servers omit RFC 5746 secure-renegotiation support.
+        # Permit the initial connection only on this context, while disallowing
+        # renegotiation entirely. The standard profile retains normal defaults.
+        context.options |= ssl.OP_LEGACY_SERVER_CONNECT | ssl.OP_NO_RENEGOTIATION
     if not ca:
         context.check_hostname = False
         context.verify_mode = ssl.CERT_NONE
@@ -229,6 +233,7 @@ class MeterClient:
         self.info: dict[str, str] = {}
         self.registers: dict[str, Register] = {}
         self._visited: set[str] = set()
+        self._discovered_values: dict[str, Decimal] = {}
 
     def url(self, href: str) -> str:
         url = urljoin(self.base + "/", href)
@@ -262,13 +267,15 @@ class MeterClient:
                         raise InvalidResponse("Response too large")
                 return parse_xml(bytes(body))
         except (aiohttp.ClientSSLError, ssl.SSLError) as err:
-            raise AuthenticationError("TLS connection rejected") from err
+            reason = getattr(getattr(err, "os_error", err), "reason", "SSL_ERROR")
+            raise AuthenticationError(f"TLS connection rejected ({reason})") from err
         except (aiohttp.ClientError, TimeoutError) as err:
             raise MeterError("Cannot connect to meter") from err
 
     async def discover(self) -> dict[str, Decimal | None]:
         self._visited.clear()
         self.registers.clear()
+        self._discovered_values.clear()
         async with asyncio.timeout(90):
             await self._walk("/dcap")
             if not self.info.get("lfdi"):
@@ -282,12 +289,12 @@ class MeterClient:
                     if register.href in self.registers:
                         continue
                     root = await self.get(register.href)
-                    if root is not None:
-                        register.value(root)
+                    if root is not None and text(root, "value"):
+                        self._discovered_values[register.href] = register.value(root)
                         self.registers[register.href] = register
             if not self.registers:
                 raise InvalidResponse("No supported readings discovered")
-            return await self.poll()
+            return dict(self._discovered_values)
 
     def _identity(self, root: ET.Element) -> None:
         lfdi = text(root, "lFDI")
@@ -336,16 +343,20 @@ class MeterClient:
                 metadata = await self.get(urljoin(self.url(href), child.attrib["href"]))
             elif local_name(child) == "ReadingType":
                 metadata = child
-        if local_name(root) == "Reading" and metadata is not None:
+        if local_name(root) == "Reading" and metadata is not None and text(root, "value"):
             reading_url = urlsplit(self.url(urljoin(self.url(href), root.get("href", href))))
             reading_href = reading_url.path + ("?" + reading_url.query if reading_url.query else "")
             self.url(reading_href)
             register = from_metadata(reading_href, name, metadata, root)
             if register:
-                register.value(root)
+                self._discovered_values[reading_href] = register.value(root)
                 self.registers[reading_href] = register
         for child in root:
             tag = local_name(child)
+            if self.profile == "itron" and tag == "ReadingSetListLink":
+                # Itron exposes large historical interval archives here. Current
+                # registers and TOU counters are probed via the firmware profile.
+                continue
             if tag in LINKS and child.get("href"):
                 await self._walk(urljoin(self.url(href), child.attrib["href"]), metadata, name)
             elif tag in CONTAINERS or tag == "Reading":
@@ -364,5 +375,5 @@ class MeterClient:
         values: dict[str, Decimal | None] = {}
         for href, register in self.registers.items():
             root = await self.get(href)
-            values[href] = None if root is None else register.value(root)
+            values[href] = None if root is None or not text(root, "value") else register.value(root)
         return values

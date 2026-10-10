@@ -39,7 +39,10 @@ entry; Home Assistant administrators can access it. Files are never committed to
 this repo, exposed through diagnostics, or included in log messages.
 
 **Itron / Xcel:** uses TLS 1.2 and `ECDHE-ECDSA-AES128-CCM8`. The required OpenSSL
-security level is lowered **only on this meter's SSL context**. No global
+security level is lowered **only on this meter's SSL context**. It also permits
+an initial connection to older servers that omit secure-renegotiation support,
+while disabling subsequent TLS renegotiation. These compatibility settings carry
+legacy TLS risks and are confined to the explicitly selected Itron profile. No global
 `OPENSSL_CONF`, patched libraries, or shared HA client settings. Without a CA,
 server certificate verification is disabled, matching the existing Itron bridges;
 only use this mode on a trusted network. Upload a CA to enable server certificate
@@ -68,11 +71,13 @@ List pagination is supported. Requests have size/time/resource limits; discovere
 links cannot forward client credentials to another server, and redirects are not
 followed. XML DTDs and entities are rejected.
 
-The Itron profile additionally probes the known firmware-map endpoints from
+The Itron profile skips historical reading-set archives and probes the known
+firmware-map endpoints for current readings from
 `xcel_itron2mqtt`: instantaneous demand, imported/exported energy, apparent and
 reactive energy, TOU registers 0–3, maximum demand, and power factor per phase.
-Only endpoints that return a valid reading create sensors; missing endpoints are
-skipped. Where advertised metadata exists, it takes precedence over the fallback.
+Only endpoints that return a valid reading create sensors; missing endpoints and
+empty Reading resources (such as an unused power-factor phase) are skipped. An
+empty Reading returned later marks its sensor unavailable. Where advertised metadata exists, it takes precedence over the fallback.
 
 TOU register numbers do **not** universally mean on-/off-peak. Rename entities in
 HA to match your utility's documented tariff after confirming the mapping. No

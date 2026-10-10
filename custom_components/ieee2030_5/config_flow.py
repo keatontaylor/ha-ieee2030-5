@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import ssl
 from functools import partial
 
@@ -28,6 +29,8 @@ from .protocol import (
     MeterError,
     build_ssl_context,
 )
+
+_LOGGER = logging.getLogger(__name__)
 
 FILE = FileSelector(FileSelectorConfig(accept=".pem,.crt,.cer,.key"))
 
@@ -63,6 +66,7 @@ class MeterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     def __init__(self) -> None:
         self._defaults: dict = {}
         self._reauth = False
+        self._uploaded_files: dict[str, bytes] = {}
 
     async def async_step_zeroconf(self, discovery_info):
         # Discovery has no authenticated meter identity yet. HA's helper handles
@@ -88,18 +92,31 @@ class MeterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return await self._configure(user_input, True)
 
     async def _upload(self, file_id: str) -> bytes:
+        # HA consumes each upload UUID once. Keep bytes only in this short-lived
+        # flow so correcting a failed connection does not require another upload.
+        if file_id in self._uploaded_files:
+            return self._uploaded_files[file_id]
+
         def read():
             with process_uploaded_file(self.hass, file_id) as path:
                 if path.stat().st_size > 64 * 1024:
                     raise ValueError("Certificate file is too large")
                 return path.read_bytes()
 
-        return await self.hass.async_add_executor_job(read)
+        content = await self.hass.async_add_executor_job(read)
+        self._uploaded_files[file_id] = content
+        return content
 
     async def _configure(self, user_input: dict | None, rotate: bool):
         step = "reauth_confirm" if self._reauth else "reconfigure" if rotate else "user"
         errors = {}
         if user_input is not None:
+            file_ids = {
+                user_input.get(field) for field in ("certificate", "private_key", "ca_certificate")
+            }
+            self._uploaded_files = {
+                key: value for key, value in self._uploaded_files.items() if key in file_ids
+            }
             data = {**self._defaults, **user_input}
             new_credentials = None
             session = None
@@ -150,6 +167,7 @@ class MeterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     old_credentials = entry.data["credentials"]
                     result = self.async_update_reload_and_abort(entry, data_updates=data)
                     new_credentials = None
+                    self._uploaded_files.clear()
                     if old_credentials != data["credentials"]:
                         await self.hass.async_add_executor_job(
                             remove_credentials, self.hass.config.config_dir, old_credentials
@@ -157,12 +175,19 @@ class MeterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     return result
                 result = self.async_create_entry(title="Smart Energy Meter", data=data)
                 new_credentials = None
+                self._uploaded_files.clear()
                 return result
-            except AuthenticationError:
+            except AuthenticationError as err:
+                _LOGGER.warning("Meter setup rejected: %s", err)
                 errors["base"] = "invalid_auth"
-            except InvalidResponse, ValueError, KeyError, OSError, ssl.SSLError:
+            except InvalidResponse as err:
+                _LOGGER.warning("Meter discovery failed: %s", err)
+                errors["base"] = "invalid_configuration"
+            except ValueError, KeyError, OSError, ssl.SSLError:
+                _LOGGER.warning("Meter setup has invalid credentials or connection settings")
                 errors["base"] = "invalid_configuration"
             except MeterError, TimeoutError:
+                _LOGGER.warning("Meter setup could not connect or exceeded the discovery timeout")
                 errors["base"] = "cannot_connect"
             finally:
                 if session is not None:

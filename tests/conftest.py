@@ -127,7 +127,7 @@ async def meter_server(certificates, aiohttp_server, socket_enabled, request):
         ),
         "/mr": xml(
             "MeterReadingList",
-            '<MeterReading href="/mr/1"><description>Grid import</description><ReadingTypeLink href="/rt"/><ReadingSetListLink href="/sets"/></MeterReading>',
+            '<MeterReading href="/mr/1"><description>Grid import</description><ReadingTypeLink href="/rt"/><ReadingLink href="/reading/1"/><ReadingSetListLink href="/sets"/></MeterReading>',
             'all="1" results="1"',
         ),
         "/rt": xml(
