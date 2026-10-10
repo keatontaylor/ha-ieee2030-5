@@ -1,5 +1,7 @@
 # Smart Energy Meter — IEEE 2030.5 (Xcel / Itron)
 
+<img src="custom_components/ieee2030_5/brand/icon.png" alt="Smart Energy Meter icon" width="96" height="96">
+
 A local, read-only Home Assistant custom integration for smart electric meters.
 Start with Xcel Energy's Itron meters; use standard IEEE 2030.5 metering links
 where a device advertises them. No MQTT bridge, extra container, or cloud poller.
@@ -124,6 +126,37 @@ Net energy metadata uses a total state class so decreases remain meaningful.
 Unavailable or missing readings are not replaced with zero. Entity IDs use the
 meter LFDI and resource path, so an IP change preserves history.
 
+### Hourly and daily imported energy
+
+When a cumulative import register is identified, the integration automatically adds
+**Energy imported hourly** and **Energy imported daily** on the same meter device.
+These counters show kWh accumulated during the current calendar hour and day,
+using the existing imported-energy readings. No helpers, YAML, or additional meter
+requests are needed. Export, net energy and separate TOU tiers are not combined
+into the import source. For standard-profile meters, the source must advertise
+an unambiguous forward-flow cumulative real-energy register.
+
+Hourly counters reset at the start of each local hour; daily counters reset at
+midnight in Home Assistant's configured time zone. Daylight-saving changes are
+handled as calendar boundaries, including separate occurrences of a repeated
+hour. The `last_period` attribute holds the previous period's kWh, and `source`
+identifies the cumulative sensor. Totals and the source baseline are restored
+after a restart, preventing duplicate counting. A reset of the source counter
+rebases the calculation without adding its lifetime total.
+
+The first hour and day are partial periods, starting with installation. A restart
+within a period includes consumption since the previous saved reading. If downtime
+or a known source outage spans a boundary, consumption across that gap is not
+backfilled into the new period. A missing source marks its counters unavailable.
+Boundary attribution has the resolution of the cumulative import polling interval
+(60 seconds by default); these are monitoring counters, not billing measurements.
+
+Keep the original cumulative imported-energy sensor as the input to HA's Energy
+dashboard. The hourly and daily counters are alternative views of the same usage;
+adding all three as separate grid-consumption sources would double-count it.
+The bundled icon is installed with the integration and works without an external
+branding service.
+
 ## Automated maintenance
 
 - No additional integration runtime dependencies: aiohttp and the schema/UI APIs
@@ -165,6 +198,8 @@ readings, malformed XML, cross-origin links, certificate rotation, setup failure
 identity mismatch, sensor availability, cleanup and ZIP structure. Controlled-clock
 tests cover separate register cadences, automatic HA polling, demand priority,
 request pacing, cached counter values and per-register failure backoff.
+Calendar-counter tests cover source selection, missing readings, counter resets,
+restart restoration, midnight and hour boundaries, DST, and no added HTTP traffic.
 
 Mock fixtures do not prove a physical meter's firmware, tariff labels, certificate
 enrollment, or all HA/OpenSSL versions. Keep your existing bridge until you compare

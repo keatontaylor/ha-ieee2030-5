@@ -130,6 +130,7 @@ class Register:
     tier: str | None = None
     scale: Decimal = Decimal(1)
     poll_category: str | None = None
+    flow_direction: int | None = None
 
     @property
     def category(self) -> str:
@@ -192,7 +193,31 @@ def from_metadata(
         tier,
         scale,
         "maximum_demand" if qualifier == 8 and device_class == "power" else None,
+        flow_direction=direction,
     )
+
+
+def imported_energy_register(registers: dict[str, Register], profile: str) -> Register | None:
+    """Select one import total, never add duplicate aliases or TOU counters."""
+    if profile == "itron":
+        for href in ("/upt/1/mr/3/rs/1/r/1", "/upt/1/mr/3/r"):
+            if (
+                (register := registers.get(href))
+                and register.unit == "Wh"
+                and register.state_class == "total_increasing"
+                and register.tier in (None, "0")
+                and register.flow_direction in (None, 1)
+            ):
+                return register
+    candidates = [
+        register
+        for register in registers.values()
+        if register.unit == "Wh"
+        and register.flow_direction == 1
+        and register.tier in (None, "0")
+        and register.state_class == "total_increasing"
+    ]
+    return candidates[0] if len(candidates) == 1 else None
 
 
 def itron_registers() -> list[Register]:
