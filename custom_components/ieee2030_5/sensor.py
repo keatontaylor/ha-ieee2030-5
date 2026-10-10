@@ -5,13 +5,23 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
+from .protocol import imported_energy_register
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
+    from .period_sensor import ImportPeriodSensor
+
     coordinator = entry.runtime_data
-    async_add_entities(
-        MeterSensor(coordinator, register) for register in coordinator.client.registers.values()
-    )
+    sensors = {
+        register.href: MeterSensor(coordinator, register)
+        for register in coordinator.client.registers.values()
+    }
+    entities = list(sensors.values())
+    if source := imported_energy_register(coordinator.client.registers, coordinator.client.profile):
+        entities.extend(
+            ImportPeriodSensor(sensors[source.href], cycle) for cycle in ("hourly", "daily")
+        )
+    async_add_entities(entities)
 
 
 class MeterSensor(CoordinatorEntity, SensorEntity):
