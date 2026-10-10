@@ -5,12 +5,12 @@
     "step": {
       "user": {
         "title": "Connect your smart meter",
-        "description": "Upload the client certificate and private key registered with your utility. The Itron profile uses TLS 1.2 / CCM8 and disables server verification unless a CA is supplied. Standard uses verified TLS and requires a CA. For reconfiguration, omit uploads to retain existing files; upload a full set to replace them. TOU tiers are not automatically mapped to a tariff.",
+        "description": "Upload the client certificate and private key registered with your utility. The Itron profile uses TLS 1.2 / CCM8 and disables server verification unless a CA is supplied. Standard uses verified TLS and requires a CA. For reconfiguration, omit uploads to retain existing files; upload a full set to replace them. TOU tiers are not automatically mapped to a tariff. Instantaneous readings use the selected interval (minimum 5 seconds). Electrical measurements use at least 30 seconds, energy totals 60 seconds, TOU counters 5 minutes, and maximum demand 15 minutes.",
         "data": {
           "host": "Meter hostname or IP address",
           "port": "HTTPS port",
           "profile": "Connection profile",
-          "interval": "Polling interval (seconds)",
+          "interval": "Instantaneous polling interval (seconds)",
           "certificate": "Client certificate (PEM)",
           "private_key": "Client private key (PEM)",
           "ca_certificate": "Meter CA certificate (optional for Itron)",
@@ -19,12 +19,12 @@
       },
       "reconfigure": {
         "title": "Update meter connection and certificates",
-        "description": "Upload the client certificate and private key registered with your utility. The Itron profile uses TLS 1.2 / CCM8 and disables server verification unless a CA is supplied. Standard uses verified TLS and requires a CA. For reconfiguration, omit uploads to retain existing files; upload a full set to replace them. TOU tiers are not automatically mapped to a tariff.",
+        "description": "Upload the client certificate and private key registered with your utility. The Itron profile uses TLS 1.2 / CCM8 and disables server verification unless a CA is supplied. Standard uses verified TLS and requires a CA. For reconfiguration, omit uploads to retain existing files; upload a full set to replace them. TOU tiers are not automatically mapped to a tariff. Instantaneous readings use the selected interval (minimum 5 seconds). Electrical measurements use at least 30 seconds, energy totals 60 seconds, TOU counters 5 minutes, and maximum demand 15 minutes.",
         "data": {
           "host": "Meter hostname or IP address",
           "port": "HTTPS port",
           "profile": "Connection profile",
-          "interval": "Polling interval (seconds)",
+          "interval": "Instantaneous polling interval (seconds)",
           "certificate": "Client certificate (PEM)",
           "private_key": "Client private key (PEM)",
           "ca_certificate": "Meter CA certificate (optional for Itron)",
@@ -33,12 +33,12 @@
       },
       "reauth_confirm": {
         "title": "Update meter connection and certificates",
-        "description": "Upload the client certificate and private key registered with your utility. The Itron profile uses TLS 1.2 / CCM8 and disables server verification unless a CA is supplied. Standard uses verified TLS and requires a CA. For reconfiguration, omit uploads to retain existing files; upload a full set to replace them. TOU tiers are not automatically mapped to a tariff.",
+        "description": "Upload the client certificate and private key registered with your utility. The Itron profile uses TLS 1.2 / CCM8 and disables server verification unless a CA is supplied. Standard uses verified TLS and requires a CA. For reconfiguration, omit uploads to retain existing files; upload a full set to replace them. TOU tiers are not automatically mapped to a tariff. Instantaneous readings use the selected interval (minimum 5 seconds). Electrical measurements use at least 30 seconds, energy totals 60 seconds, TOU counters 5 minutes, and maximum demand 15 minutes.",
         "data": {
           "host": "Meter hostname or IP address",
           "port": "HTTPS port",
           "profile": "Connection profile",
-          "interval": "Polling interval (seconds)",
+          "interval": "Instantaneous polling interval (seconds)",
           "certificate": "Client certificate (PEM)",
           "private_key": "Client private key (PEM)",
           "ca_certificate": "Meter CA certificate (optional for Itron)",

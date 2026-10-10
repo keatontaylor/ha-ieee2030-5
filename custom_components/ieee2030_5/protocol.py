@@ -6,16 +6,23 @@ No Home Assistant imports: the same client is exercised against real TLS servers
 from __future__ import annotations
 
 import asyncio
+import logging
 import ssl
 import xml.etree.ElementTree as ET
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation
+from time import monotonic
 from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit
 
 import aiohttp
 
+from .const import DEFAULT_INTERVAL
+
 MAX_BODY = 256 * 1024
 MAX_RESOURCES = 128
+REQUEST_GAP = 0.5
+POLL_INTERVALS = {"electrical": 30, "energy": 60, "tou": 300, "maximum_demand": 900}
+_LOGGER = logging.getLogger(__name__)
 NAMESPACES = {"urn:ieee:std:2030.5:ns", "http://ieee.org/2030.5"}
 LINKS = {
     "SelfDeviceLink",
@@ -122,6 +129,22 @@ class Register:
     multiplier: int = 0
     tier: str | None = None
     scale: Decimal = Decimal(1)
+    poll_category: str | None = None
+
+    @property
+    def category(self) -> str:
+        if self.poll_category is not None:
+            return self.poll_category
+        if self.unit in ("Wh", "VAh", "varh"):
+            return "tou" if self.tier is not None else "energy"
+        if self.device_class in ("power", "apparent_power", "reactive_power"):
+            return "instantaneous"
+        return "electrical"
+
+    def interval(self, instantaneous_interval: int) -> int:
+        return max(
+            instantaneous_interval, POLL_INTERVALS.get(self.category, instantaneous_interval)
+        )
 
     def value(self, root: ET.Element) -> Decimal:
         raw = text(root, "value")
@@ -143,6 +166,7 @@ def from_metadata(
         multiplier = int(text(metadata, "powerOfTenMultiplier", "0"))
         accumulation = int(text(metadata, "accumulationBehaviour", "0"))
         direction = int(text(metadata, "flowDirection", "0"))
+        qualifier = int(text(metadata, "dataQualifier", "0"))
     except ValueError as err:
         raise InvalidResponse("Invalid ReadingType") from err
     if uom not in UNITS or not -12 <= multiplier <= 12:
@@ -158,7 +182,17 @@ def from_metadata(
         name = f"{name} TOU tier {tier}"
     # CosTheta is a fraction; HA power_factor requires a percentage.
     scale = Decimal(100) if uom == 65 else Decimal(1)
-    return Register(href, name, unit, device_class, state_class, multiplier, tier, scale)
+    return Register(
+        href,
+        name,
+        unit,
+        device_class,
+        state_class,
+        multiplier,
+        tier,
+        scale,
+        "maximum_demand" if qualifier == 8 and device_class == "power" else None,
+    )
 
 
 def itron_registers() -> list[Register]:
@@ -193,7 +227,12 @@ def itron_registers() -> list[Register]:
     for index, direction in ((17, "exported"), (18, "imported")):
         registers.append(
             Register(
-                f"/upt/1/mr/{index}/r", f"Maximum demand {direction}", "W", "power", "measurement"
+                f"/upt/1/mr/{index}/r",
+                f"Maximum demand {direction}",
+                "W",
+                "power",
+                "measurement",
+                poll_category="maximum_demand",
             )
         )
     for index, phase in ((19, ""), (20, " phase A"), (21, " phase B"), (22, " phase C")):
@@ -221,6 +260,8 @@ class MeterClient:
         port: int,
         context: ssl.SSLContext,
         profile: str = "itron",
+        *,
+        instantaneous_interval: int = DEFAULT_INTERVAL,
     ) -> None:
         if not host or any(char in host for char in "/?#@") or not 1 <= port <= 65535:
             raise ValueError("Enter a hostname or IP address, not a URL")
@@ -234,6 +275,13 @@ class MeterClient:
         self.registers: dict[str, Register] = {}
         self._visited: set[str] = set()
         self._discovered_values: dict[str, Decimal] = {}
+        self.instantaneous_interval = instantaneous_interval
+        self._values: dict[str, Decimal | None] = {}
+        self._next_due: dict[str, float] = {}
+        self._failures: dict[str, int] = {}
+        self._request_lock = asyncio.Lock()
+        self._next_request = 0.0
+        self._discovery_cache: dict[str, ET.Element | None] | None = None
 
     def url(self, href: str) -> str:
         url = urljoin(self.base + "/", href)
@@ -244,14 +292,24 @@ class MeterClient:
             raise InvalidResponse("Invalid meter link")
         return url
 
-    async def get(self, href: str) -> ET.Element | None:
+    async def get(self, href: str, *, timeout: float = 10) -> ET.Element | None:
+        async with self._request_lock:
+            delay = self._next_request - monotonic()
+            if delay > 0:
+                await asyncio.sleep(delay)
+            try:
+                return await self._get(href, timeout=timeout)
+            finally:
+                self._next_request = monotonic() + REQUEST_GAP
+
+    async def _get(self, href: str, *, timeout: float = 10) -> ET.Element | None:
         url = self.url(href)
         try:
             async with self.session.get(
                 url,
                 ssl=self.context,
                 allow_redirects=False,
-                timeout=aiohttp.ClientTimeout(total=10),
+                timeout=aiohttp.ClientTimeout(total=timeout),
                 headers={"Accept": "application/sep+xml, application/xml"},
             ) as response:
                 if response.status == 404:
@@ -276,25 +334,59 @@ class MeterClient:
         self._visited.clear()
         self.registers.clear()
         self._discovered_values.clear()
-        async with asyncio.timeout(90):
-            await self._walk("/dcap")
-            if not self.info.get("lfdi"):
-                root = await self.get("/sdev/sdi")
-                if root is not None:
-                    self._identity(root)
-            if not self.info.get("lfdi"):
-                raise InvalidResponse("Meter does not advertise an LFDI")
-            if self.profile == "itron":
-                for register in itron_registers():
-                    if register.href in self.registers:
-                        continue
-                    root = await self.get(register.href)
-                    if root is not None and text(root, "value"):
-                        self._discovered_values[register.href] = register.value(root)
-                        self.registers[register.href] = register
-            if not self.registers:
-                raise InvalidResponse("No supported readings discovered")
-            return dict(self._discovered_values)
+        self._discovery_cache = {}
+        try:
+            async with asyncio.timeout(120):
+                return await self._discover()
+        finally:
+            self._discovery_cache = None
+
+    async def _discovery_get(self, href: str) -> ET.Element | None:
+        url = self.url(href)
+        if url not in self._discovery_cache:
+            self._discovery_cache[url] = await self.get(href)
+        return self._discovery_cache[url]
+
+    async def _discover(self) -> dict[str, Decimal | None]:
+        await self._walk("/dcap")
+        if not self.info.get("lfdi"):
+            root = await self._discovery_get("/sdev/sdi")
+            if root is not None:
+                self._identity(root)
+        if not self.info.get("lfdi"):
+            raise InvalidResponse("Meter does not advertise an LFDI")
+        if self.profile == "itron":
+            for register in itron_registers():
+                if register.href in self.registers:
+                    continue
+                root = await self._discovery_get(register.href)
+                if root is not None and text(root, "value"):
+                    self._discovered_values[register.href] = register.value(root)
+                    self.registers[register.href] = register
+        if not self.registers:
+            raise InvalidResponse("No supported readings discovered")
+        # Preserve metadata semantics while applying known firmware cadences.
+        if self.profile == "itron":
+            known = {item.href: item for item in itron_registers()}
+            for href, register in self.registers.items():
+                if href in known and known[href].poll_category is not None:
+                    self.registers[href] = replace(
+                        register, poll_category=known[href].poll_category
+                    )
+        self._values = dict(self._discovered_values)
+        self._failures.clear()
+        now = monotonic()
+        # Discovery already fetched every initial value. Stagger subsequent
+        # reads so startup and manual refreshes do not create a full burst.
+        categories: dict[str, int] = {}
+        self._next_due.clear()
+        for href, register in self.registers.items():
+            offset = categories.get(register.category, 0)
+            categories[register.category] = offset + 1
+            self._next_due[href] = (
+                now + register.interval(self.instantaneous_interval) + offset * REQUEST_GAP
+            )
+        return dict(self._discovered_values)
 
     def _identity(self, root: ET.Element) -> None:
         lfdi = text(root, "lFDI")
@@ -315,7 +407,7 @@ class MeterClient:
         if len(self._visited) >= MAX_RESOURCES:
             raise InvalidResponse("Meter discovery exceeded resource limit")
         self._visited.add(url)
-        root = await self.get(href)
+        root = await self._discovery_get(href)
         if root is not None:
             await self._element(root, href, metadata, name)
             # IEEE List resources paginate with s (start) and l (limit).
@@ -340,7 +432,7 @@ class MeterClient:
         name = text(root, "description", name)
         for child in root:
             if local_name(child) == "ReadingTypeLink" and child.get("href"):
-                metadata = await self.get(urljoin(self.url(href), child.attrib["href"]))
+                metadata = await self._discovery_get(urljoin(self.url(href), child.attrib["href"]))
             elif local_name(child) == "ReadingType":
                 metadata = child
         if local_name(root) == "Reading" and metadata is not None and text(root, "value"):
@@ -377,3 +469,67 @@ class MeterClient:
             root = await self.get(href)
             values[href] = None if root is None or not text(root, "value") else register.value(root)
         return values
+
+    @property
+    def registers_in_backoff(self) -> int:
+        return len(self._failures)
+
+    @property
+    def next_poll_delay(self) -> float:
+        """Wake for the next due register without busy-looping HA's timer."""
+        return max(1.0, min(self._next_due.values(), default=monotonic() + 30) - monotonic())
+
+    async def poll_due(self) -> dict[str, Decimal | None]:
+        """Read one due resource, prioritizing instantaneous measurements.
+
+        Cached slower values remain present in every coordinator snapshot.
+        One slow resource per refresh lets newly due demand readings go first.
+        """
+        now = monotonic()
+        due = [href for href, when in self._next_due.items() if when <= now]
+        if not due:
+            return dict(self._values)
+        href = min(
+            due,
+            key=lambda item: (
+                self.registers[item].category != "instantaneous",
+                self._next_due[item],
+            ),
+        )
+        register = self.registers[href]
+        interval = register.interval(self.instantaneous_interval)
+        timeout = 10.0
+        if register.category != "instantaneous":
+            next_instant = min(
+                (
+                    when
+                    for resource, when in self._next_due.items()
+                    if self.registers[resource].category == "instantaneous"
+                ),
+                default=now + 10,
+            )
+            # A sluggish counter must not occupy the connection across multiple
+            # demand intervals. No overlapping requests or speculative retries.
+            timeout = min(timeout, max(1.0, next_instant - now - REQUEST_GAP))
+        try:
+            root = await self.get(href, timeout=timeout)
+            if root is None or not text(root, "value"):
+                raise MeterError("Meter register has no reading")
+            value = register.value(root)
+        except AuthenticationError:
+            raise
+        except MeterError as err:
+            self._values[href] = None
+            failures = self._failures.get(href, 0) + 1
+            self._failures[href] = failures
+            if failures == 1:
+                _LOGGER.warning("Meter register read failed; backing off: %s", err)
+            self._next_due[href] = monotonic() + min(
+                max(900, interval), max(30, interval) * 2 ** min(failures - 1, 5)
+            )
+        else:
+            self._values[href] = value
+            if self._failures.pop(href, None):
+                _LOGGER.info("Meter register read recovered")
+            self._next_due[href] = monotonic() + interval
+        return dict(self._values)

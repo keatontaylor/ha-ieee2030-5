@@ -20,7 +20,7 @@ PLATFORMS = [Platform.SENSOR]
 
 
 class MeterCoordinator(DataUpdateCoordinator):
-    """Poll the meter sequentially; a failure marks values unavailable."""
+    """Refresh due registers without repeatedly fetching slower counters."""
 
     def __init__(self, hass, entry, client):
         super().__init__(
@@ -28,17 +28,19 @@ class MeterCoordinator(DataUpdateCoordinator):
             _LOGGER,
             name="Smart Energy Meter",
             config_entry=entry,
-            update_interval=timedelta(seconds=entry.data["interval"]),
+            update_interval=timedelta(seconds=client.next_poll_delay),
         )
         self.client = client
 
     async def _async_update_data(self):
         try:
-            return await self.client.poll()
+            return await self.client.poll_due()
         except AuthenticationError as err:
             raise ConfigEntryAuthFailed("Meter certificate or TLS connection rejected") from err
         except MeterError as err:
             raise UpdateFailed(str(err)) from err
+        finally:
+            self.update_interval = timedelta(seconds=self.client.next_poll_delay)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -59,7 +61,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         session = async_create_clientsession(hass, auto_cleanup=False)
         entry.async_on_unload(session.detach)
         client = MeterClient(
-            session, entry.data["host"], entry.data["port"], context, entry.data["profile"]
+            session,
+            entry.data["host"],
+            entry.data["port"],
+            context,
+            entry.data["profile"],
+            instantaneous_interval=entry.data["interval"],
         )
         await client.discover()
         if client.info["lfdi"] != entry.unique_id:

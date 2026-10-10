@@ -102,8 +102,11 @@ def xml(tag, body="", attributes=""):
 
 
 @pytest.fixture
-async def meter_server(certificates, aiohttp_server, socket_enabled, request):
+async def meter_server(certificates, aiohttp_server, socket_enabled, request, monkeypatch):
     """HTTPS fixture enforces both the actual CCM8 cipher and client auth."""
+    # Real pacing is tested separately with a controlled clock; TLS/HA tests
+    # should not spend minutes waiting between intentionally absent endpoints.
+    monkeypatch.setattr("custom_components.ieee2030_5.protocol.REQUEST_GAP", 0)
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     if getattr(request, "param", True):
         context.minimum_version = ssl.TLSVersion.TLSv1_2

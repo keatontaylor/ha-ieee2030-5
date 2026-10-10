@@ -44,4 +44,11 @@ class MeterSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def extra_state_attributes(self):
-        return {"tou_tier": self.register.tier} if self.register.tier is not None else None
+        attributes = {
+            "poll_interval_seconds": self.register.interval(
+                self.coordinator.client.instantaneous_interval
+            )
+        }
+        if self.register.tier is not None:
+            attributes["tou_tier"] = self.register.tier
+        return attributes
