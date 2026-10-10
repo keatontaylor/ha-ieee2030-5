@@ -45,7 +45,7 @@ def schema(defaults: dict, rotate: bool = False) -> vol.Schema:
             SelectSelectorConfig(options=["itron", "standard"], translation_key="profile")
         ),
         vol.Required("interval", default=defaults.get("interval", DEFAULT_INTERVAL)): vol.All(
-            vol.Coerce(int), vol.Range(min=30, max=3600)
+            vol.Coerce(int), vol.Range(min=5, max=3600)
         ),
         vol.Optional("key_password", default=defaults.get("key_password", "")): TextSelector(
             TextSelectorConfig(type=TextSelectorType.PASSWORD)

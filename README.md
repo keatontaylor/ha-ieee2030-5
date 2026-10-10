@@ -52,11 +52,46 @@ and hostname verification. The entered hostname/IP must then match its certifica
 or security-level override. A provider using different certificates or resources
 may require its own device profile; this is not universal compatibility.
 
-Use **Reconfigure** on the integration to update the address, polling interval,
+Use **Reconfigure** on the integration to update the address, instantaneous polling interval,
 or replace credentials. Omit uploads to retain existing credentials. Upload the
 full certificate/key/optional-CA set to replace them. New files are validated
 before old files are removed. A different meter identity is rejected. Removing
 the integration removes its stored credential files.
+
+### Polling intervals
+
+Registers have separate schedules, with these defaults:
+
+| Reading | Interval |
+| --- | --- |
+| Instantaneous demand / real, apparent and reactive power | 5 seconds |
+| Power factor, voltage, current and frequency | 30 seconds |
+| Cumulative real, apparent and reactive energy | 60 seconds |
+| TOU energy counters (including tier 0) | 5 minutes |
+| Maximum demand | 15 minutes |
+
+The wizard's **Instantaneous polling interval** controls the fastest readings.
+Choosing a longer interval also slows any category that would otherwise run
+faster. Existing installations retain their saved interval: use **Reconfigure**
+to select five seconds if desired; certificate uploads are not required.
+
+Each refresh reads one due resource, giving instantaneous measurements priority
+and preserving cached slower values. Counters are staggered rather than fetched
+in one batch. Requests are serialized with a half-second pause after each
+response, including during discovery. Shared discovery resources are fetched
+once per discovery, and setup reuses the discovered initial readings.
+
+Intervals are targets measured after a request completes, not guarantees: slow
+responses and a meter with many instantaneous registers can extend them. Slow
+counter requests have a timeout limited by the next demand read. A failed or
+empty register becomes unavailable and backs off independently, from at least
+30 seconds up to 15 minutes (or the configured interval if longer). Other
+readings continue updating. Authentication failures still trigger reauthentication.
+Entity attributes and downloaded diagnostics include the effective interval.
+
+Successful requests do not prove that the meter supplied a fresh measurement.
+Home Assistant may keep its displayed update timestamp unchanged when a value
+and its attributes are unchanged, even though polling continues.
 
 mDNS uses `_smartenergy._tcp.local.` through HA's existing discovery service.
 Manual addressing works when multicast discovery cannot cross your VLANs.
@@ -127,7 +162,9 @@ The fake HTTPS meter generates an ECDSA CA, server and client certificates,
 requires a valid client certificate and negotiates the actual CCM8 cipher. Tests
 cover standard resource discovery, pagination, firmware fallback, signed/scaled
 readings, malformed XML, cross-origin links, certificate rotation, setup failure,
-identity mismatch, sensor availability, cleanup and ZIP structure.
+identity mismatch, sensor availability, cleanup and ZIP structure. Controlled-clock
+tests cover separate register cadences, automatic HA polling, demand priority,
+request pacing, cached counter values and per-register failure backoff.
 
 Mock fixtures do not prove a physical meter's firmware, tariff labels, certificate
 enrollment, or all HA/OpenSSL versions. Keep your existing bridge until you compare

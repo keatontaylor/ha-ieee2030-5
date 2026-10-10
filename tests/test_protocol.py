@@ -271,3 +271,36 @@ async def test_itron_does_not_crawl_historical_archives_or_repoll_during_setup(
     assert "/readings" not in calls
     assert calls.count("/reading/1") == 1
     assert calls.count("/upt/1/mr/1/r") == 1
+
+
+async def test_discovery_caches_shared_metadata_and_schedules_known_maximum_demand(
+    meter_server, certificates
+):
+    server, routes, calls, _ = meter_server
+    routes["/mr"] = xml(
+        "MeterReadingList",
+        '<MeterReading href="/mr/1"><ReadingTypeLink href="/rt"/><ReadingLink href="/reading/1"/></MeterReading>'
+        '<MeterReading href="/mr/2"><ReadingTypeLink href="/rt"/><ReadingLink href="/reading/2"/></MeterReading>'
+        '<MeterReading href="/mr/3"><ReadingTypeLink href="/power-type"/><ReadingLink href="/upt/1/mr/18/r"/></MeterReading>',
+        'all="3" results="3"',
+    )
+    routes["/reading/2"] = xml("Reading", "<value>456</value>")
+    routes["/power-type"] = xml("ReadingType", "<uom>38</uom>")
+    routes["/upt/1/mr/18/r"] = xml("Reading", "<value>789</value>")
+    async with aiohttp.ClientSession() as session:
+        client = MeterClient(session, "127.0.0.1", server.port, context(certificates))
+        await client.discover()
+        calls_before = list(calls)
+        assert await client.poll_due() == {
+            "/reading/1": 1234,
+            "/reading/2": 456,
+            "/upt/1/mr/18/r": 789,
+            "/upt/1/mr/1/r": -42,
+        }
+        assert calls == calls_before
+        assert client.registers["/upt/1/mr/18/r"].interval(5) == 900
+        assert (
+            client.registers["/upt/1/mr/18/r"].value(parse_xml(routes["/upt/1/mr/18/r"].encode()))
+            == 789
+        )
+    assert calls.count("/rt") == 1
