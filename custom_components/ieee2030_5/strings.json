@@ -1,0 +1,67 @@
+{
+  "title": "Smart Energy Meter (Xcel / Itron)",
+  "config": {
+    "flow_title": "{name}",
+    "step": {
+      "user": {
+        "title": "Connect your smart meter",
+        "description": "Upload the client certificate and private key registered with your utility. The Itron profile uses TLS 1.2 / CCM8 and disables server verification unless a CA is supplied. Standard uses verified TLS and requires a CA. For reconfiguration, omit uploads to retain existing files; upload a full set to replace them. TOU tiers are not automatically mapped to a tariff.",
+        "data": {
+          "host": "Meter hostname or IP address",
+          "port": "HTTPS port",
+          "profile": "Connection profile",
+          "interval": "Polling interval (seconds)",
+          "certificate": "Client certificate (PEM)",
+          "private_key": "Client private key (PEM)",
+          "ca_certificate": "Meter CA certificate (optional for Itron)",
+          "key_password": "Private key passphrase (if encrypted)"
+        }
+      },
+      "reconfigure": {
+        "title": "Update meter connection and certificates",
+        "description": "Upload the client certificate and private key registered with your utility. The Itron profile uses TLS 1.2 / CCM8 and disables server verification unless a CA is supplied. Standard uses verified TLS and requires a CA. For reconfiguration, omit uploads to retain existing files; upload a full set to replace them. TOU tiers are not automatically mapped to a tariff.",
+        "data": {
+          "host": "Meter hostname or IP address",
+          "port": "HTTPS port",
+          "profile": "Connection profile",
+          "interval": "Polling interval (seconds)",
+          "certificate": "Client certificate (PEM)",
+          "private_key": "Client private key (PEM)",
+          "ca_certificate": "Meter CA certificate (optional for Itron)",
+          "key_password": "Private key passphrase (if encrypted)"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Update meter connection and certificates",
+        "description": "Upload the client certificate and private key registered with your utility. The Itron profile uses TLS 1.2 / CCM8 and disables server verification unless a CA is supplied. Standard uses verified TLS and requires a CA. For reconfiguration, omit uploads to retain existing files; upload a full set to replace them. TOU tiers are not automatically mapped to a tariff.",
+        "data": {
+          "host": "Meter hostname or IP address",
+          "port": "HTTPS port",
+          "profile": "Connection profile",
+          "interval": "Polling interval (seconds)",
+          "certificate": "Client certificate (PEM)",
+          "private_key": "Client private key (PEM)",
+          "ca_certificate": "Meter CA certificate (optional for Itron)",
+          "key_password": "Private key passphrase (if encrypted)"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "The meter rejected the certificate or TLS connection. Check the registered certificate, key, and selected profile.",
+      "invalid_configuration": "Check the certificate/key pair, optional CA, address, and meter response. Upload both certificate and key together. The standard profile requires a CA.",
+      "cannot_connect": "Unable to reach the meter. Check network access, address, and port."
+    },
+    "abort": {
+      "already_configured": "This meter is already configured.",
+      "unique_id_mismatch": "The supplied address belongs to a different meter. Existing settings were preserved."
+    }
+  },
+  "selector": {
+    "profile": {
+      "options": {
+        "itron": "Itron / Xcel (CCM8 compatibility)",
+        "standard": "Standard IEEE 2030.5 (verified TLS)"
+      }
+    }
+  }
+}

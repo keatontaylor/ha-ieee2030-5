@@ -1,0 +1,66 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: '23 13 * * 1'
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  checks:
+    name: Required checks
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: astral-sh/setup-uv@94527f2e458b27549849d47d273a16bec83a01e9 # v7
+        with:
+          enable-cache: true
+      - run: uv sync --frozen --group dev
+      - run: uv run --frozen ruff check .
+      - run: uv run --frozen ruff format --check .
+      - run: uv run --frozen pytest
+  minimum:
+    name: Minimum Home Assistant
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: astral-sh/setup-uv@94527f2e458b27549849d47d273a16bec83a01e9 # v7
+      - run: uv venv --python 3.14
+      # Intentional minimum baseline; update together with hacs.json.
+      - run: uv pip install homeassistant==2026.10.0 pytest-homeassistant-custom-component==0.13.371
+      - run: .venv/bin/pytest
+  hassfest:
+    name: Home Assistant validation
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: home-assistant/actions/hassfest@06749dd8c0b54f350bc69c8752456cee498808a3
+  release:
+    name: Publish install package
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [checks, minimum, hassfest]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: astral-sh/setup-uv@94527f2e458b27549849d47d273a16bec83a01e9 # v7
+      - name: Build versioned HACS package
+        run: |
+          release_version="$(uv run --no-project python -c 'import json; v=json.load(open("custom_components/ieee2030_5/manifest.json"))["version"].split("."); print(".".join(v[:2]))').${GITHUB_RUN_NUMBER}"
+          uv run --no-project python scripts/package.py --version "$release_version"
+          echo "RELEASE_VERSION=$release_version" >> "$GITHUB_ENV"
+      - name: Publish tag and install ZIP
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "v${RELEASE_VERSION}" >/dev/null 2>&1; then
+            gh release upload "v${RELEASE_VERSION}" dist/ieee2030_5.zip --clobber
+          else
+            gh release create "v${RELEASE_VERSION}" dist/ieee2030_5.zip --target "$GITHUB_SHA" --title "v${RELEASE_VERSION}" --generate-notes
+          fi

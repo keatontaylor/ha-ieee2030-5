@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.pem
+*.key
+*.crt
+*.cer
+.storage/
+dist/

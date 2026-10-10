@@ -1,0 +1,30 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", ":dependencyDashboard", ":pinDigests"],
+  "rangeStrategy": "pin",
+  "prConcurrentLimit": 3,
+  "minimumReleaseAge": "3 days",
+  "platformAutomerge": true,
+  "automergeType": "pr",
+  "packageRules": [
+    {
+      "description": "Keep HA and its test harness in one tested update",
+      "matchPackageNames": ["homeassistant", "pytest-homeassistant-custom-component"],
+      "groupName": "Home Assistant test environment"
+    },
+    {
+      "matchUpdateTypes": ["patch", "minor", "digest"],
+      "automerge": true
+    },
+    {
+      "matchUpdateTypes": ["major"],
+      "automerge": false
+    },
+    {
+      "description": "The minimum HA test baseline is intentionally fixed",
+      "matchFileNames": [".github/workflows/ci.yml"],
+      "matchManagers": ["pip_requirements"],
+      "enabled": false
+    }
+  ]
+}

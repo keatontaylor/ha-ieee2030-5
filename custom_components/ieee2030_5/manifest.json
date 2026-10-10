@@ -1,0 +1,14 @@
+{
+  "domain": "ieee2030_5",
+  "name": "Smart Energy Meter (Xcel / Itron)",
+  "codeowners": ["@keatontaylor"],
+  "config_flow": true,
+  "dependencies": ["file_upload"],
+  "documentation": "https://github.com/keatontaylor/ha-ieee2030-5",
+  "integration_type": "device",
+  "iot_class": "local_polling",
+  "issue_tracker": "https://github.com/keatontaylor/ha-ieee2030-5/issues",
+  "requirements": [],
+  "version": "0.1.0",
+  "zeroconf": ["_smartenergy._tcp.local."]
+}

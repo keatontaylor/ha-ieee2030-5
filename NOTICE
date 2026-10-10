@@ -1,0 +1,17 @@
+Smart Energy Meter — IEEE 2030.5
+Copyright 2026 Keaton Taylor
+
+Itron endpoint paths and register names are adapted from:
+zaknye/xcel_itron2mqtt, v1.2.0
+https://github.com/zaknye/xcel_itron2mqtt/tree/5cefecadfd833587163de8f88fcdc000aedb1d9b
+Copyright contributors to xcel_itron2mqtt. Licensed under Apache-2.0.
+Their endpoint maps label apparent/reactive energy as Wh; this integration
+corrects the units to VAh/varh. TOU semantics are not inferred from tier number.
+
+Discovery design also references user00265/itron-go-mqtt:
+https://github.com/user00265/itron-go-mqtt/tree/0fd38765ddd73811b374c706937fdd7acd5d056c
+The implementation is original; no Go code is included. That project uses MIT.
+
+IEEE resource names, unit codes and metadata semantics follow the published
+IEEE 2030.5-2023 schema; the schema itself is not distributed in this repository.
+https://standards.ieee.org/wp-content/uploads/2024/12/2030.5-2023_downloads.zip
