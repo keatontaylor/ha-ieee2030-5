@@ -203,3 +203,16 @@ async def test_absolute_resource_links_keep_identity_independent_of_ip(meter_ser
     async with aiohttp.ClientSession() as session:
         client = MeterClient(session, "127.0.0.1", server.port, context(certificates), "standard")
         assert await client.discover() == {"/reading/1": 1234}
+
+
+async def test_relative_advertised_links(meter_server, certificates):
+    server, routes, _, _ = meter_server
+    routes["/sets"] = xml(
+        "ReadingSetList",
+        '<ReadingSet href="/sets/1"><ReadingListLink href="readings"/></ReadingSet>',
+        'all="1" results="1"',
+    )
+    routes["/sets/readings"] = routes.pop("/readings")
+    async with aiohttp.ClientSession() as session:
+        client = MeterClient(session, "127.0.0.1", server.port, context(certificates), "standard")
+        assert await client.discover() == {"/reading/1": 1234}

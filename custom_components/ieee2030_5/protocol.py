@@ -333,11 +333,11 @@ class MeterClient:
         name = text(root, "description", name)
         for child in root:
             if local_name(child) == "ReadingTypeLink" and child.get("href"):
-                metadata = await self.get(child.attrib["href"])
+                metadata = await self.get(urljoin(self.url(href), child.attrib["href"]))
             elif local_name(child) == "ReadingType":
                 metadata = child
         if local_name(root) == "Reading" and metadata is not None:
-            reading_url = urlsplit(self.url(root.get("href", href)))
+            reading_url = urlsplit(self.url(urljoin(self.url(href), root.get("href", href))))
             reading_href = reading_url.path + ("?" + reading_url.query if reading_url.query else "")
             self.url(reading_href)
             register = from_metadata(reading_href, name, metadata, root)
@@ -347,9 +347,11 @@ class MeterClient:
         for child in root:
             tag = local_name(child)
             if tag in LINKS and child.get("href"):
-                await self._walk(child.attrib["href"], metadata, name)
+                await self._walk(urljoin(self.url(href), child.attrib["href"]), metadata, name)
             elif tag in CONTAINERS or tag == "Reading":
-                await self._element(child, child.get("href", href), metadata, name)
+                await self._element(
+                    child, urljoin(self.url(href), child.get("href", href)), metadata, name
+                )
 
     async def poll(self) -> dict[str, Decimal | None]:
         try:

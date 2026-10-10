@@ -1,7 +1,7 @@
 from pathlib import Path
 from unittest.mock import patch
 
-from homeassistant.config_entries import SOURCE_RECONFIGURE, SOURCE_USER
+from homeassistant.config_entries import SOURCE_REAUTH, SOURCE_RECONFIGURE, SOURCE_USER
 from homeassistant.data_entry_flow import FlowResultType
 
 from custom_components.ieee2030_5.const import DOMAIN
@@ -31,7 +31,9 @@ async def submit(hass, meter_server, certificates, *, source=SOURCE_USER, entry=
         patch("custom_components.ieee2030_5.config_flow.MeterConfigFlow._upload", upload),
         patch("custom_components.ieee2030_5.async_setup_entry", return_value=True),
     ):
-        result = await hass.config_entries.flow.async_init(DOMAIN, context=ctx)
+        result = await hass.config_entries.flow.async_init(
+            DOMAIN, context=ctx, data=dict(entry.data) if source == SOURCE_REAUTH else None
+        )
         assert result["type"] == FlowResultType.FORM
         return await hass.config_entries.flow.async_configure(result["flow_id"], data)
 
@@ -123,3 +125,35 @@ async def test_native_home_assistant_file_upload(hass, hass_client, meter_server
         )
     assert result["type"] == FlowResultType.CREATE_ENTRY
     assert not hass.data[_DATA].files
+
+
+async def test_reauthenticate_certificate_rotation(hass, meter_server, certificates):
+    first = await submit(hass, meter_server, certificates)
+    entry = first["result"]
+    result = await submit(hass, meter_server, certificates, source=SOURCE_REAUTH, entry=entry)
+    assert result["type"] == FlowResultType.ABORT
+    assert result["reason"] == "reauth_successful"
+    assert entry.unique_id == "aabbccdd"
+
+
+async def test_mdns_discovery_prompts_for_certificates(hass, meter_server):
+    from ipaddress import ip_address
+
+    from homeassistant.config_entries import SOURCE_ZEROCONF
+    from homeassistant.helpers.service_info.zeroconf import ZeroconfServiceInfo
+
+    discovery = ZeroconfServiceInfo(
+        ip_address=ip_address("127.0.0.1"),
+        ip_addresses=[ip_address("127.0.0.1")],
+        port=meter_server[0].port,
+        hostname="meter.local.",
+        type="_smartenergy._tcp.local.",
+        name="Itron._smartenergy._tcp.local.",
+        properties={},
+    )
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_ZEROCONF}, data=discovery
+    )
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "user"
+    assert not hass.config_entries.async_entries(DOMAIN)
